@@ -84,10 +84,19 @@ int main(int argc, char **argv)
     std::string raw_request(buffer, bytes_read >= 0 ? bytes_read : 0);
     std::string requested_url = extractUrl(raw_request);
 
-    std::string response = (requested_url == "/")
-                               ? "HTTP/1.1 200 OK\r\n\r\n"
-                               : "HTTP/1.1 404 Not Found\r\n\r\n";
-
+    std::string response;
+    if (requested_url == "/")
+    {
+      response = "HTTP/1.1 200 OK\r\n\r\n";
+    }
+    else if (requested_url.find("echo") != std::string::npos)
+    {
+      std::cout << "url in echo : " << requested_url << std::endl;
+    }
+    else
+    {
+      response = "HTTP/1.1 404 Not Found\r\n\r\n";
+    }
     send(client_fd, response.c_str(), response.size(), 0);
     close(client_fd);
   }
