@@ -9,6 +9,7 @@
 #include <netdb.h>
 #include <sstream>
 #include <vector>
+#include <thread>
 #include <unordered_map>
 
 const int PORT = 4221;
@@ -75,6 +76,43 @@ std::string buildResponse(const std::string &status, const std::string &body, co
   return response.str();
 }
 
+void handleClient(int client_socket)
+{
+
+  char buffer[BUFFER_SIZE] = {0};
+  ssize_t bytes_read = read(client_socket, buffer, BUFFER_SIZE - 1);
+  if (bytes_read > 0)
+  {
+
+    std::string raw_request(buffer, bytes_read >= 0 ? bytes_read : 0);
+    std::string requested_url = extractUrl(raw_request);
+
+    std::string response;
+    if (requested_url == "/")
+    {
+      response = buildResponse("200 OK", "", "text/plain");
+    }
+    else if (requested_url.rfind("/echo/", 0) == 0)
+    {
+      std::string body = requested_url.substr(6);
+      response = buildResponse("200 OK", body, "text/plain");
+    }
+    else if (requested_url.rfind("/user-agent", 0) == 0)
+    {
+      std::unordered_map<std::string, std::string> headers = extractAllHeaders(raw_request);
+      std::string user_agent = headers.count("User-Agent") ? headers["User-Agent"] : "";
+
+      response = buildResponse("200 OK", user_agent.c_str(), "text/plain");
+    }
+    else
+    {
+      response = buildResponse("404 Not Found", "", "text/plain");
+    }
+    send(client_socket, response.c_str(), response.size(), 0);
+  }
+  close(client_socket);
+}
+
 int main(int argc, char **argv)
 {
   // Flush after every std::cout / std::cerr
@@ -133,35 +171,8 @@ int main(int argc, char **argv)
     }
     std::cout << "Client connected\n";
 
-    char buffer[BUFFER_SIZE] = {0};
-    ssize_t bytes_read = read(client_fd, buffer, BUFFER_SIZE - 1);
-
-    std::string raw_request(buffer, bytes_read >= 0 ? bytes_read : 0);
-    std::string requested_url = extractUrl(raw_request);
-
-    std::string response;
-    if (requested_url == "/")
-    {
-      response = buildResponse("200 OK", "", "text/plain");
-    }
-    else if (requested_url.rfind("/echo/", 0) == 0)
-    {
-      std::string body = requested_url.substr(6);
-      response = buildResponse("200 OK", body, "text/plain");
-    }
-    else if (requested_url.rfind("/user-agent", 0) == 0)
-    {
-      std::unordered_map<std::string, std::string> headers = extractAllHeaders(raw_request);
-      std::string user_agent = headers.count("User-Agent") ? headers["User-Agent"] : "";
-
-      response = buildResponse("200 OK", user_agent.c_str(), "text/plain");
-    }
-    else
-    {
-      response = buildResponse("404 Not Found", "", "text/plain");
-    }
-    send(client_fd, response.c_str(), response.size(), 0);
-    close(client_fd);
+    std::thread t(handleClient, client_fd);
+    t.detach();
   }
   close(server_fd);
 
