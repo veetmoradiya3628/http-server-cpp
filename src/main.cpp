@@ -93,7 +93,25 @@ std::string buildResponse(const std::string &status, const std::string &body, co
   return response.str();
 }
 
-void handleClient(int client_socket)
+size_t getContentLength(const std::unordered_map<std::string, std::string> &headers)
+{
+  auto it = headers.find("Content-Length");
+  if (it == headers.end())
+  {
+    return 0;
+  }
+
+  try
+  {
+    return static_cast<size_t>(std::stoul(it->second));
+  }
+  catch (const std::exception &)
+  {
+    return 0;
+  }
+}
+
+std::string readRequest(int client_socket)
 {
   std::string request_data;
   char buffer[BUFFER_SIZE] = {0};
@@ -115,33 +133,41 @@ void handleClient(int client_socket)
     }
 
     std::unordered_map<std::string, std::string> headers = extractAllHeaders(request_data.substr(0, header_end + 4));
-    std::string content_length_header = headers.count("Content-Length") ? headers["Content-Length"] : "0";
-
-    size_t content_length = 0;
-    try
-    {
-      content_length = std::stoul(content_length_header);
-    }
-    catch (const std::exception &)
-    {
-      content_length = 0;
-    }
-
+    size_t content_length = getContentLength(headers);
     size_t body_start = header_end + 4;
+
     if (request_data.size() - body_start >= content_length)
     {
       break;
     }
   }
 
+  return request_data;
+}
+
+std::string extractRequestBody(const std::string &request)
+{
+  size_t header_end = request.find("\r\n\r\n");
+  if (header_end == std::string::npos)
+  {
+    return "";
+  }
+
+  return request.substr(header_end + 4);
+}
+
+void handleClient(int client_socket)
+{
+  std::string request_data = readRequest(client_socket);
+
   if (!request_data.empty())
   {
-    std::string raw_request = request_data;
-    std::istringstream request_stream(raw_request);
+    std::istringstream request_stream(request_data);
     std::string method, requested_url, version;
     request_stream >> method >> requested_url >> version;
 
     std::string file_route_prefix = "/files/";
+    std::string body = extractRequestBody(request_data);
 
     std::string response;
     if (requested_url == "/")
@@ -150,12 +176,12 @@ void handleClient(int client_socket)
     }
     else if (requested_url.rfind("/echo/", 0) == 0)
     {
-      std::string body = requested_url.substr(6);
-      response = buildResponse("200 OK", body, "text/plain");
+      std::string echo_body = requested_url.substr(6);
+      response = buildResponse("200 OK", echo_body, "text/plain");
     }
     else if (requested_url.rfind("/user-agent", 0) == 0)
     {
-      std::unordered_map<std::string, std::string> headers = extractAllHeaders(raw_request);
+      std::unordered_map<std::string, std::string> headers = extractAllHeaders(request_data);
       std::string user_agent = headers.count("User-Agent") ? headers["User-Agent"] : "";
 
       response = buildResponse("200 OK", user_agent, "text/plain");
@@ -165,14 +191,6 @@ void handleClient(int client_socket)
       std::string filename = requested_url.substr(file_route_prefix.length());
       std::string base_directory = target_directory.empty() ? "." : target_directory;
       std::string full_file_path = base_directory + "/" + filename;
-
-      size_t header_end = raw_request.find("\r\n\r\n");
-      std::string body = "";
-      if (header_end != std::string::npos)
-      {
-        size_t body_start = header_end + 4;
-        body = raw_request.substr(body_start);
-      }
 
       std::ofstream output_file(full_file_path, std::ios::binary | std::ios::trunc);
       if (output_file.is_open())
