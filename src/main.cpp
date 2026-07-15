@@ -11,9 +11,12 @@
 #include <vector>
 #include <thread>
 #include <unordered_map>
+#include <fstream>
 
 const int PORT = 4221;
 const int BUFFER_SIZE = 4096;
+
+std::string target_directory = "";
 
 std::string extractUrl(const std::string &req)
 {
@@ -21,6 +24,20 @@ std::string extractUrl(const std::string &req)
   std::string method, url, version;
   iss >> method >> url >> version;
   return url;
+}
+
+std::string readFileContent(const std::string &full_path, bool &file_exists)
+{
+  std::ifstream file(full_path, std::ios::binary);
+  if (!file.is_open())
+  {
+    file_exists = false;
+    return "";
+  }
+  file_exists = true;
+  std::ostringstream ss;
+  ss << file.rdbuf();
+  return ss.str();
 }
 
 std::unordered_map<std::string, std::string> extractAllHeaders(const std::string &request)
@@ -86,6 +103,7 @@ void handleClient(int client_socket)
 
     std::string raw_request(buffer, bytes_read >= 0 ? bytes_read : 0);
     std::string requested_url = extractUrl(raw_request);
+    std::string file_route_prefix = "/files/";
 
     std::string response;
     if (requested_url == "/")
@@ -104,6 +122,25 @@ void handleClient(int client_socket)
 
       response = buildResponse("200 OK", user_agent.c_str(), "text/plain");
     }
+    else if (requested_url.rfind(file_route_prefix, 0) == 0)
+    {
+      std::string filename = requested_url.substr(file_route_prefix.length());
+      std::string full_file_path = target_directory + "/" + filename;
+
+      bool file_exists = false;
+      std::string file_content = readFileContent(full_file_path, file_exists);
+
+      if (file_exists)
+      {
+        // SUCCESS: Return file contents with application/octet-stream mapping
+        response = buildResponse("200 OK", file_content, "application/octet-stream");
+      }
+      else
+      {
+        // FAILURE: Return strict 404 block for missing files
+        response = buildResponse("404 Not Found", "", "text/plain");
+      }
+    }
     else
     {
       response = buildResponse("404 Not Found", "", "text/plain");
@@ -121,6 +158,15 @@ int main(int argc, char **argv)
 
   // You can use print statements as follows for debugging, they'll be visible when running tests.
   std::cout << "Logs from your program will appear here!\n";
+
+  for (int i = 1; i < argc; ++i)
+  {
+    if (std::string(argv[i]) == "--directory" && i + 1 < argc)
+    {
+      target_directory = argv[i + 1];
+      break;
+    }
+  }
 
   int server_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (server_fd < 0)
