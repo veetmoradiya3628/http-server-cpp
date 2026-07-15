@@ -7,6 +7,18 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <sstream>
+
+const int PORT = 4221;
+const int BUFFER_SIZE = 4096;
+
+std::string extractUrl(const std::string &req)
+{
+  std::istringstream iss(req);
+  std::string method, url, version;
+  iss >> method >> url >> version;
+  return url;
+}
 
 int main(int argc, char **argv)
 {
@@ -36,7 +48,7 @@ int main(int argc, char **argv)
   struct sockaddr_in server_addr;
   server_addr.sin_family = AF_INET;
   server_addr.sin_addr.s_addr = INADDR_ANY;
-  server_addr.sin_port = htons(4221);
+  server_addr.sin_port = htons(PORT);
 
   if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) != 0)
   {
@@ -65,8 +77,18 @@ int main(int argc, char **argv)
       continue;
     }
     std::cout << "Client connected\n";
-    std::string response = "HTTP/1.1 200 OK\r\n\r\n";
-    send(client_fd, response.c_str(), response.length(), 0);
+
+    char buffer[BUFFER_SIZE] = {0};
+    ssize_t bytes_read = read(client_fd, buffer, BUFFER_SIZE - 1);
+
+    std::string raw_request(buffer, bytes_read >= 0 ? bytes_read : 0);
+    std::string requested_url = extractUrl(raw_request);
+
+    std::string response = (requested_url == "/")
+                               ? "HTTP/1.1 200 OK\r\n\r\n"
+                               : "HTTP/1.1 404 Not Found\r\n\r\n";
+
+    send(client_fd, response.c_str(), response.size(), 0);
     close(client_fd);
   }
   close(server_fd);
