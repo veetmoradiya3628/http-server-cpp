@@ -9,6 +9,7 @@
 #include <netdb.h>
 #include <sstream>
 #include <vector>
+#include <unordered_map>
 
 const int PORT = 4221;
 const int BUFFER_SIZE = 4096;
@@ -19,6 +20,47 @@ std::string extractUrl(const std::string &req)
   std::string method, url, version;
   iss >> method >> url >> version;
   return url;
+}
+
+std::unordered_map<std::string, std::string> extractAllHeaders(const std::string &request)
+{
+  std::unordered_map<std::string, std::string> headers;
+  std::istringstream stream(request);
+  std::string line;
+
+  if (!std::getline(stream, line))
+  {
+    return headers;
+  }
+
+  while (std::getline(stream, line))
+  {
+    if (!line.empty() && line.back() == '\r')
+    {
+      line.pop_back();
+    }
+    if (line.empty())
+    {
+      break;
+    }
+    size_t colon_pos = line.find(':');
+    if (colon_pos != std::string::npos)
+    {
+      std::string header_name = line.substr(0, colon_pos);
+      std::string header_value = line.substr(colon_pos + 1);
+      size_t first_non_space = header_value.find_first_not_of(" \t");
+      if (first_non_space != std::string::npos)
+      {
+        header_value = header_value.substr(first_non_space);
+      }
+      else
+      {
+        header_value = "";
+      }
+      headers[header_name] = header_value;
+    }
+  }
+  return headers;
 }
 
 std::string buildResponse(const std::string &status, const std::string &body, const std::string &content_type)
@@ -106,6 +148,13 @@ int main(int argc, char **argv)
     {
       std::string body = requested_url.substr(6);
       response = buildResponse("200 OK", body, "text/plain");
+    }
+    else if (requested_url.rfind("/user-agent", 0) == 0)
+    {
+      std::unordered_map<std::string, std::string> headers = extractAllHeaders(raw_request);
+      std::string user_agent = headers.count("User-Agent") ? headers["User-Agent"] : "";
+
+      response = buildResponse("200 OK", user_agent.c_str(), "text/plain");
     }
     else
     {
