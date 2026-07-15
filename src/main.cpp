@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sstream>
+#include <vector>
 
 const int PORT = 4221;
 const int BUFFER_SIZE = 4096;
@@ -18,6 +19,18 @@ std::string extractUrl(const std::string &req)
   std::string method, url, version;
   iss >> method >> url >> version;
   return url;
+}
+
+std::string buildResponse(const std::string &status, const std::string &body, const std::string &content_type)
+{
+  std::ostringstream response;
+  response << "HTTP/1.1 " << status << "\r\n";
+  response << "Content-Type: " << content_type << "\r\n";
+  response << "Content-Length: " << body.size() << "\r\n";
+  response << "Connection: close\r\n";
+  response << "\r\n";
+  response << body;
+  return response.str();
 }
 
 int main(int argc, char **argv)
@@ -87,15 +100,16 @@ int main(int argc, char **argv)
     std::string response;
     if (requested_url == "/")
     {
-      response = "HTTP/1.1 200 OK\r\n\r\n";
+      response = buildResponse("200 OK", "", "text/plain");
     }
-    else if (requested_url.find("echo") != std::string::npos)
+    else if (requested_url.rfind("/echo/", 0) == 0)
     {
-      std::cout << "url in echo : " << requested_url << std::endl;
+      std::string body = requested_url.substr(6);
+      response = buildResponse("200 OK", body, "text/plain");
     }
     else
     {
-      response = "HTTP/1.1 404 Not Found\r\n\r\n";
+      response = buildResponse("404 Not Found", "", "text/plain");
     }
     send(client_fd, response.c_str(), response.size(), 0);
     close(client_fd);
