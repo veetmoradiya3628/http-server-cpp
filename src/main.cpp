@@ -81,14 +81,31 @@ std::unordered_map<std::string, std::string> extractAllHeaders(const std::string
   return headers;
 }
 
-std::string buildResponse(const std::string &status, const std::string &body, const std::string &content_type, const std::string &content_encoding = "")
+std::vector<std::string> split(const std::string &str, char delimiter)
+{
+  std::vector<std::string> result;
+  std::stringstream ss(str);
+  std::string token;
+
+  while (std::getline(ss, token, delimiter))
+  {
+    result.push_back(token);
+  }
+
+  return result;
+}
+
+std::string buildResponse(const std::string &status,
+                          const std::string &body,
+                          const std::string &content_type,
+                          const std::vector<std::pair<std::string, std::string>> &headers = {})
 {
   std::ostringstream response;
   response << "HTTP/1.1 " << status << "\r\n";
   response << "Content-Type: " << content_type << "\r\n";
-  if (!content_encoding.empty())
+  for (const auto &header : headers)
   {
-    response << "Content-Encoding: " << content_encoding << "\r\n";
+    response << header.first << ": " << header.second << "\r\n";
   }
   response << "Content-Length: " << body.size() << "\r\n";
   response << "Connection: close\r\n";
@@ -182,16 +199,15 @@ void handleClient(int client_socket)
     {
       std::unordered_map<std::string, std::string> headers = extractAllHeaders(request_data);
       std::string accept_encoding = headers.count("Accept-Encoding") ? headers["Accept-Encoding"] : "";
-      if (accept_encoding == "gzip")
+      std::string echo_body = requested_url.substr(6);
+
+      std::vector<std::string> accepted_encoding = split(accept_encoding, ',');
+      std::vector<std::pair<std::string, std::string>> response_headers;
+      if (accept_encoding.find("gzip") != std::string::npos)
       {
-        std::string echo_body = requested_url.substr(6);
-        response = buildResponse("200 OK", echo_body, "text/plain", accept_encoding);
+        response_headers.emplace_back("Content-Encoding", "gzip");
       }
-      else
-      {
-        std::string echo_body = requested_url.substr(6);
-        response = buildResponse("200 OK", echo_body, "text/plain");
-      }
+      response = buildResponse("200 OK", echo_body, "text/plain", response_headers);
     }
     else if (requested_url.rfind("/user-agent", 0) == 0)
     {
