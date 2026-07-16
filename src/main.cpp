@@ -157,7 +157,8 @@ bool acceptsGzip(const std::string &accept_encoding)
 std::string buildResponse(const std::string &status,
                           const std::string &body,
                           const std::string &content_type,
-                          const std::vector<std::pair<std::string, std::string>> &headers = {})
+                          const std::vector<std::pair<std::string, std::string>> &headers = {},
+                          bool keep_alive = true)
 {
   std::ostringstream response;
   response << "HTTP/1.1 " << status << "\r\n";
@@ -167,7 +168,7 @@ std::string buildResponse(const std::string &status,
     response << header.first << ": " << header.second << "\r\n";
   }
   response << "Content-Length: " << body.size() << "\r\n";
-  response << "Connection: close\r\n";
+  response << "Connection: " << (keep_alive ? "keep-alive" : "close") << "\r\n";
   response << "\r\n";
   response << body;
   return response.str();
@@ -191,38 +192,36 @@ size_t getContentLength(const std::unordered_map<std::string, std::string> &head
   }
 }
 
-std::string readRequest(int client_socket)
+std::string readRequest(int client_socket, std::string &buffer)
 {
-  std::string request_data;
-  char buffer[BUFFER_SIZE] = {0};
-
   while (true)
   {
-    ssize_t bytes_read = read(client_socket, buffer, BUFFER_SIZE - 1);
+    size_t header_end = buffer.find("\r\n\r\n");
+    if (header_end != std::string::npos)
+    {
+      std::unordered_map<std::string, std::string> headers = extractAllHeaders(buffer.substr(0, header_end + 4));
+      size_t content_length = getContentLength(headers);
+      size_t body_start = header_end + 4;
+
+      if (buffer.size() - body_start >= content_length)
+      {
+        std::string request = buffer.substr(0, body_start + content_length);
+        buffer.erase(0, body_start + content_length);
+        return request;
+      }
+    }
+
+    char temp_buffer[BUFFER_SIZE] = {0};
+    ssize_t bytes_read = read(client_socket, temp_buffer, BUFFER_SIZE - 1);
     if (bytes_read <= 0)
     {
       break;
     }
 
-    request_data.append(buffer, bytes_read);
-
-    size_t header_end = request_data.find("\r\n\r\n");
-    if (header_end == std::string::npos)
-    {
-      continue;
-    }
-
-    std::unordered_map<std::string, std::string> headers = extractAllHeaders(request_data.substr(0, header_end + 4));
-    size_t content_length = getContentLength(headers);
-    size_t body_start = header_end + 4;
-
-    if (request_data.size() - body_start >= content_length)
-    {
-      break;
-    }
+    buffer.append(temp_buffer, bytes_read);
   }
 
-  return request_data;
+  return "";
 }
 
 std::string extractRequestBody(const std::string &request)
@@ -238,26 +237,34 @@ std::string extractRequestBody(const std::string &request)
 
 void handleClient(int client_socket)
 {
-  std::string request_data = readRequest(client_socket);
+  std::string pending_data;
 
-  if (!request_data.empty())
+  while (true)
   {
+    std::string request_data = readRequest(client_socket, pending_data);
+
+    if (request_data.empty())
+    {
+      break;
+    }
+
     std::istringstream request_stream(request_data);
     std::string method, requested_url, version;
     request_stream >> method >> requested_url >> version;
 
+    std::unordered_map<std::string, std::string> request_headers = extractAllHeaders(request_data);
+    bool should_close = request_headers.count("Connection") && request_headers["Connection"] == "close";
+
     std::string file_route_prefix = "/files/";
     std::string body = extractRequestBody(request_data);
-
     std::string response;
     if (requested_url == "/")
     {
-      response = buildResponse("200 OK", "", "text/plain");
+      response = buildResponse("200 OK", "", "text/plain", {}, !should_close);
     }
     else if (requested_url.rfind("/echo/", 0) == 0)
     {
-      std::unordered_map<std::string, std::string> headers = extractAllHeaders(request_data);
-      std::string accept_encoding = headers.count("Accept-Encoding") ? headers["Accept-Encoding"] : "";
+      std::string accept_encoding = request_headers.count("Accept-Encoding") ? request_headers["Accept-Encoding"] : "";
       std::string echo_body = requested_url.substr(6);
       std::string response_body = echo_body;
 
@@ -271,14 +278,13 @@ void handleClient(int client_socket)
           response_headers.emplace_back("Content-Encoding", "gzip");
         }
       }
-      response = buildResponse("200 OK", response_body, "text/plain", response_headers);
+      response = buildResponse("200 OK", response_body, "text/plain", response_headers, !should_close);
     }
     else if (requested_url.rfind("/user-agent", 0) == 0)
     {
-      std::unordered_map<std::string, std::string> headers = extractAllHeaders(request_data);
-      std::string user_agent = headers.count("User-Agent") ? headers["User-Agent"] : "";
+      std::string user_agent = request_headers.count("User-Agent") ? request_headers["User-Agent"] : "";
 
-      response = buildResponse("200 OK", user_agent, "text/plain");
+      response = buildResponse("200 OK", user_agent, "text/plain", {}, !should_close);
     }
     else if (method == "POST" && requested_url.rfind(file_route_prefix, 0) == 0)
     {
@@ -291,11 +297,11 @@ void handleClient(int client_socket)
       {
         output_file.write(body.c_str(), static_cast<std::streamsize>(body.size()));
         output_file.close();
-        response = buildResponse("201 Created", "", "text/plain");
+        response = buildResponse("201 Created", "", "text/plain", {}, !should_close);
       }
       else
       {
-        response = buildResponse("500 Internal Server Error", "", "text/plain");
+        response = buildResponse("500 Internal Server Error", "", "text/plain", {}, !should_close);
       }
     }
     else if (requested_url.rfind(file_route_prefix, 0) == 0)
@@ -308,19 +314,24 @@ void handleClient(int client_socket)
 
       if (file_exists)
       {
-        response = buildResponse("200 OK", file_content, "application/octet-stream");
+        response = buildResponse("200 OK", file_content, "application/octet-stream", {}, !should_close);
       }
       else
       {
-        response = buildResponse("404 Not Found", "", "text/plain");
+        response = buildResponse("404 Not Found", "", "text/plain", {}, !should_close);
       }
     }
     else
     {
-      response = buildResponse("404 Not Found", "", "text/plain");
+      response = buildResponse("404 Not Found", "", "text/plain", {}, !should_close);
     }
 
     send(client_socket, response.c_str(), response.size(), 0);
+
+    if (should_close)
+    {
+      break;
+    }
   }
 
   close(client_socket);
