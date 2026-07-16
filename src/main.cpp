@@ -12,6 +12,8 @@
 #include <thread>
 #include <unordered_map>
 #include <fstream>
+#include <cctype>
+#include <zlib.h>
 
 const int PORT = 4221;
 const int BUFFER_SIZE = 4096;
@@ -93,6 +95,63 @@ std::vector<std::string> split(const std::string &str, char delimiter)
   }
 
   return result;
+}
+
+std::string compressGzip(const std::string &input)
+{
+  z_stream stream{};
+  stream.next_in = reinterpret_cast<Bytef *>(const_cast<char *>(input.data()));
+  stream.avail_in = static_cast<uInt>(input.size());
+
+  if (deflateInit2(&stream, Z_BEST_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK)
+  {
+    return "";
+  }
+
+  const size_t compressed_size = deflateBound(&stream, input.size());
+  std::string compressed(compressed_size, '\0');
+
+  stream.next_out = reinterpret_cast<Bytef *>(compressed.data());
+  stream.avail_out = static_cast<uInt>(compressed.size());
+
+  int deflate_status = deflate(&stream, Z_FINISH);
+  if (deflate_status != Z_STREAM_END)
+  {
+    deflateEnd(&stream);
+    return "";
+  }
+
+  compressed.resize(stream.total_out);
+  deflateEnd(&stream);
+  return compressed;
+}
+
+bool acceptsGzip(const std::string &accept_encoding)
+{
+  if (accept_encoding.empty())
+  {
+    return false;
+  }
+
+  std::vector<std::string> encodings = split(accept_encoding, ',');
+  for (std::string &encoding : encodings)
+  {
+    while (!encoding.empty() && std::isspace(static_cast<unsigned char>(encoding.front())))
+    {
+      encoding.erase(encoding.begin());
+    }
+    while (!encoding.empty() && std::isspace(static_cast<unsigned char>(encoding.back())))
+    {
+      encoding.pop_back();
+    }
+
+    if (encoding == "gzip")
+    {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 std::string buildResponse(const std::string &status,
@@ -200,14 +259,19 @@ void handleClient(int client_socket)
       std::unordered_map<std::string, std::string> headers = extractAllHeaders(request_data);
       std::string accept_encoding = headers.count("Accept-Encoding") ? headers["Accept-Encoding"] : "";
       std::string echo_body = requested_url.substr(6);
+      std::string response_body = echo_body;
 
-      std::vector<std::string> accepted_encoding = split(accept_encoding, ',');
       std::vector<std::pair<std::string, std::string>> response_headers;
-      if (accept_encoding.find("gzip") != std::string::npos)
+      if (acceptsGzip(accept_encoding))
       {
-        response_headers.emplace_back("Content-Encoding", "gzip");
+        std::string compressed_body = compressGzip(echo_body);
+        if (!compressed_body.empty())
+        {
+          response_body = compressed_body;
+          response_headers.emplace_back("Content-Encoding", "gzip");
+        }
       }
-      response = buildResponse("200 OK", echo_body, "text/plain", response_headers);
+      response = buildResponse("200 OK", response_body, "text/plain", response_headers);
     }
     else if (requested_url.rfind("/user-agent", 0) == 0)
     {
