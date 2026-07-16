@@ -81,11 +81,15 @@ std::unordered_map<std::string, std::string> extractAllHeaders(const std::string
   return headers;
 }
 
-std::string buildResponse(const std::string &status, const std::string &body, const std::string &content_type)
+std::string buildResponse(const std::string &status, const std::string &body, const std::string &content_type, const std::string &content_encoding = "")
 {
   std::ostringstream response;
   response << "HTTP/1.1 " << status << "\r\n";
   response << "Content-Type: " << content_type << "\r\n";
+  if (!content_encoding.empty())
+  {
+    response << "Content-Encoding: " << content_encoding << "\r\n";
+  }
   response << "Content-Length: " << body.size() << "\r\n";
   response << "Connection: close\r\n";
   response << "\r\n";
@@ -176,8 +180,18 @@ void handleClient(int client_socket)
     }
     else if (requested_url.rfind("/echo/", 0) == 0)
     {
-      std::string echo_body = requested_url.substr(6);
-      response = buildResponse("200 OK", echo_body, "text/plain");
+      std::unordered_map<std::string, std::string> headers = extractAllHeaders(request_data);
+      std::string accept_encoding = headers.count("Accept-Encoding") ? headers["Accept-Encoding"] : "";
+      if (accept_encoding == "gzip")
+      {
+        std::string echo_body = requested_url.substr(6);
+        response = buildResponse("200 OK", echo_body, "text/plain", accept_encoding);
+      }
+      else
+      {
+        std::string echo_body = requested_url.substr(6);
+        response = buildResponse("200 OK", echo_body, "text/plain");
+      }
     }
     else if (requested_url.rfind("/user-agent", 0) == 0)
     {
