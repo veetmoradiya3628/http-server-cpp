@@ -1,37 +1,51 @@
 [![progress-banner](https://backend.codecrafters.io/progress/http-server/6b3401ac-235e-414d-85aa-81c0253739ef)](https://app.codecrafters.io/users/veetmoradiya3628?r=2qF)
 
-This is a starting point for C++ solutions to the
-["Build Your Own HTTP server" Challenge](https://app.codecrafters.io/courses/http-server/overview).
+This project is a C++ implementation of a simple HTTP/1.1 server built as part of the
+[Build Your Own HTTP Server](https://app.codecrafters.io/courses/http-server/overview) challenge.
 
-[HTTP](https://en.wikipedia.org/wiki/Hypertext_Transfer_Protocol) is the
-protocol that powers the web. In this challenge, you'll build a HTTP/1.1 server
-that is capable of serving multiple clients.
+# What has been implemented so far
 
-Along the way you'll learn about TCP servers,
-[HTTP request syntax](https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html),
-and more.
+The server currently supports:
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+- A basic TCP server listening on port 4221
+- A simple request parser for HTTP methods, paths, and headers
+- A root endpoint returning a basic response for `/`
+- An echo endpoint at `/echo/{str}` that returns the requested string in the response body
+- A `/user-agent` endpoint that returns the incoming `User-Agent` header value
+- Basic file handling for `/files/{name}`:
+  - `POST` stores a file on disk
+  - `GET` reads and returns the stored file content
+- Gzip compression support for `/echo/{str}` when the client sends `Accept-Encoding: gzip`
+- Persistent HTTP connections so multiple requests can be served over the same TCP connection by default
+- Basic connection handling that closes the socket only when the client explicitly requests `Connection: close`
 
-# Passing the first stage
+# Running the server
 
-The entry point for your HTTP server implementation is in `src/main.cpp`. Study
-and uncomment the relevant code, and then run the command below to execute the
-tests on our servers:
+From the project root, run:
 
 ```sh
-codecrafters submit
+./your_program.sh
 ```
 
-Time to move on to the next stage!
+You can test it with `curl`, for example:
 
-# Stage 2 & beyond
+```sh
+curl http://localhost:4221/
+curl http://localhost:4221/echo/banana
+curl -H "User-Agent: my-client" http://localhost:4221/user-agent
+```
 
-Note: This section is for stages 2 and beyond.
+# Future scope / enhancements (Case 4 and beyond)
 
-1. Ensure you have `cmake` installed locally
-1. Run `./your_program.sh` to run your program, which is implemented in
-   `src/main.cpp`.
-1. Run `codecrafters submit` to submit your solution to CodeCrafters. Test
-   output will be streamed to your terminal.
+The current implementation is a solid foundation and can be improved in several ways:
+
+- Add more complete HTTP/1.1 support, including better parsing for multiple headers and edge cases
+- Improve keep-alive handling with proper timeout and request limit management
+- Support additional methods such as `HEAD`
+- Return more accurate status codes and error responses
+- Add MIME type detection for files based on extension
+- Add directory traversal protection for file operations
+- Improve concurrency and connection handling for higher traffic
+- Add logging, metrics, and request tracing
+- Explore HTTPS/TLS support as a later-stage enhancement
+- Add support for more compression formats or content negotiation in the future
